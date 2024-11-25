@@ -44,16 +44,16 @@ int getListSize(Node* head) {
 Node* createTokenList(char* line){
     Node* head;
     Node* ptr;
-
+    // hello world0
     int inWord = 0;
     int wordLength = 0;
     int wordCapacity = BUFFER_SIZE;
     char* word = (char*)malloc(wordCapacity * sizeof(char));
-    
+    printf("The line is: %s\n", line);
     for(int i = 0; i<strlen(line); i++){
         char c = line[i];
         // Add token to list if come across a space
-        if (c == " " && inWord) {
+        if (c == ' ' && inWord) {
             word[wordLength] = '\0';
             //char* temp = realloc(word, wordLength*sizeof(char));
             word = realloc(word, wordLength*sizeof(char));
@@ -68,11 +68,9 @@ Node* createTokenList(char* line){
 
             inWord = 0;
             wordLength = 0;
-            free(word);
-            word = (char*)malloc(wordCapacity * sizeof(char));
         }
         // Add token of special characters to list on their own
-        else if (c == "<" || c == ">" || c == "|") {
+        else if (c == '<' || c == '>' || c == '|') {
             if (inWord){
                 word[wordLength] = '\0';
                 //char* temp = realloc(word, wordLength*sizeof(char));
@@ -97,7 +95,12 @@ Node* createTokenList(char* line){
 }
 
 void manageCommands(Node* head){
+    if(head == NULL) {
+        printf("head is Null\n");
+    }
+    printf("word is: %s", head->word);
     char* command = head->word;
+    printf("getting here5\n");
 
     if (strcmp(command, "cd") == 0) {
         if (getListSize(head) != 2) {
@@ -119,6 +122,9 @@ void manageCommands(Node* head){
     else if (strcmp(command, "exit") == 0) {
         exit(1);
     }
+    else if (0) { //contains slash 
+
+    }
     else{
 
     }
@@ -130,17 +136,19 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    int interactive = 1;
-    int fd = STDIN_FILENO;
-    
-    if(argc == 2) {
+    int fd, interactive;
+    if (argc == 1) {
+        fd = STDIN_FILENO;
+    }
+    else if(argc == 2) {
         fd = open(argv[1], O_RDONLY);
         if(fd < 0) {
             perror("open");
             exit(1);
         }
-        interactive = 0;
     } 
+
+    interactive = isatty(fd);
 
     char* buffer[BUFFER_SIZE];
     int bytes_read = 0;
@@ -164,11 +172,14 @@ int main(int argc, char *argv[]) {
             
             char c = buffer[i];
             if (c == '\n' || c == '\0') {
-                printf("getting here\n");
                 line[lineLength] = '\0';
-                line = realloc(line, lineLength*sizeof(char));
+                printf("The line is %s\n", line);
+                //line = realloc(line, lineLength*sizeof(char));
                 Node* head = createTokenList(line);
+                printf("getting here4\n");
                 manageCommands(head);
+                printf("getting here6\n");
+                lineLength = 0;
             }
             else {
                 line[lineLength++] = buffer[i];
