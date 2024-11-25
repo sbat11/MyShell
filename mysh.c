@@ -12,7 +12,7 @@ typedef struct Node {
 } Node;
 
 Node* createNode(char* word) {
-    Node *node = (Node*)malloc(sizeof(Node));
+    Node* node = (Node*)malloc(sizeof(Node));
     if (node == NULL) {
         perror("Failed to allocate memory for Node");
         return NULL;
@@ -33,7 +33,7 @@ int getListSize(Node* head) {
     Node* ptr = head;
     int length = 0;
 
-    while(ptr != NULL) {
+    while (ptr != NULL) {
         length++;
         ptr = ptr->next;
     }
@@ -41,152 +41,167 @@ int getListSize(Node* head) {
     return length;
 }
 
-Node* createTokenList(char* line){
-    Node* head;
-    Node* ptr;
-    // hello world0
+Node* createTokenList(char* line) {
+    Node* head = NULL;
+    Node* ptr = NULL;
+
     int inWord = 0;
     int wordLength = 0;
     int wordCapacity = BUFFER_SIZE;
     char* word = (char*)malloc(wordCapacity * sizeof(char));
-    printf("The line is: %s\n", line);
-    for(int i = 0; i<strlen(line); i++){
+    if (!word) {
+        perror("Failed to allocate memory for word");
+        return NULL;
+    }
+
+    for (int i = 0; i <= strlen(line); i++) {
         char c = line[i];
-        // Add token to list if come across a space
-        if (c == ' ' && inWord) {
+
+        if ((c == ' ' || c == '\0') && inWord) { // End of a word
             word[wordLength] = '\0';
-            //char* temp = realloc(word, wordLength*sizeof(char));
-            word = realloc(word, wordLength*sizeof(char));
-            if(ptr == NULL){
-                head = createNode(word);
-                ptr = head;
+            Node* newNode = createNode(word);
+            if (!newNode) {
+                free(word);
+                return NULL;
             }
-            else{
-                ptr->next = createNode(word);
+
+            if (head == NULL) {
+                head = newNode;
+                ptr = head;
+            } else {
+                ptr->next = newNode;
                 ptr = ptr->next;
             }
 
             inWord = 0;
             wordLength = 0;
-        }
-        // Add token of special characters to list on their own
-        else if (c == '<' || c == '>' || c == '|') {
-            if (inWord){
-                word[wordLength] = '\0';
-                //char* temp = realloc(word, wordLength*sizeof(char));
-                word = realloc(word, wordLength*sizeof(char));
-                if(ptr == NULL){
-                    head = createNode(word);
-                    ptr = head;
-                }
-                else{
-                    ptr->next = createNode(word);
-                    ptr = ptr->next;
+        } else if (c != ' ' && c != '\0') { // Part of a word
+            if (wordLength >= wordCapacity - 1) {
+                wordCapacity *= 2;
+                word = realloc(word, wordCapacity * sizeof(char));
+                if (!word) {
+                    perror("Failed to reallocate memory for word");
+                    return NULL;
                 }
             }
-        }
-        // Add letters to token
-        else {
-            word[wordLength++] = line[i];
+            word[wordLength++] = c;
+            inWord = 1;
         }
     }
 
+    free(word); // Free temporary word buffer
     return head;
 }
 
-void manageCommands(Node* head){
-    if(head == NULL) {
-        printf("head is Null\n");
+void freeTokenList(Node* head) {
+    Node* temp;
+    while (head != NULL) {
+        temp = head;
+        head = head->next;
+        free(temp->word);
+        free(temp);
     }
-    printf("word is: %s", head->word);
+}
+
+void manageCommands(Node* head) {
+    if (head == NULL) {
+        printf("head is NULL\n");
+        return;
+    }
+    printf("Command is: %s\n", head->word);
+
     char* command = head->word;
-    printf("getting here5\n");
 
     if (strcmp(command, "cd") == 0) {
         if (getListSize(head) != 2) {
             fprintf(stderr, "cd: only one file name as argument.\n");
+        } else {
+            Node* argNode = head->next;
+            if (chdir(argNode->word) != 0) {
+                perror("cd");
+            }
         }
-    }
-    else if (strcmp(command, "pwd") == 0) {
-        char cwd[BUFFER_SIZE]; 
+    } else if (strcmp(command, "pwd") == 0) {
+        char cwd[BUFFER_SIZE];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
             printf("%s\n", cwd);
-        } 
-        else {
+        } else {
             perror("pwd");
         }
-    }
-    else if (strcmp(command, "which") == 0) {
-
-    }
-    else if (strcmp(command, "exit") == 0) {
-        exit(1);
-    }
-    else if (0) { //contains slash 
-
-    }
-    else{
-
+    } else if (strcmp(command, "exit") == 0) {
+        exit(0);
+    } else {
+        printf("Command not recognized: %s\n", command);
     }
 }
 
-int main(int argc, char *argv[]) {
-    if(argc > 2) {
+int main(int argc, char* argv[]) {
+    if (argc > 2) {
         fprintf(stderr, "Usage: %s [file]\n", argv[0]);
         exit(1);
     }
 
-    int fd, interactive;
-    if (argc == 1) {
-        fd = STDIN_FILENO;
-    }
-    else if(argc == 2) {
+    int fd = STDIN_FILENO;
+    if (argc == 2) {
         fd = open(argv[1], O_RDONLY);
-        if(fd < 0) {
+        if (fd < 0) {
             perror("open");
             exit(1);
         }
-    } 
+    }
 
-    interactive = isatty(fd);
+    int interactive = isatty(fd);
+    if (interactive) {
+        printf("Welcome to my shell!\n");
+    }
 
-    char* buffer[BUFFER_SIZE];
-    int bytes_read = 0;
-    
+    char buffer[BUFFER_SIZE];
+    char* line = (char*)malloc(BUFFER_SIZE * sizeof(char));
     int lineLength = 0;
     int lineCapacity = BUFFER_SIZE;
-    char* line = (char*)malloc(lineCapacity * sizeof(char));
 
-    if(interactive) {printf("Welcome to my shell!\n");}
-
-    while(1) {
-        if(interactive){printf("mysh> "); fflush(stdout);}
-        
-        bytes_read = read(fd, buffer, BUFFER_SIZE - 1);
-        if (bytes_read <= 0){break;}
-
-        buffer[bytes_read] = '\0';
-        printf("You typed %s\n", buffer);
-        
-        for(int i = 0; i<bytes_read; i++){
-            
-            char c = buffer[i];
-            if (c == '\n' || c == '\0') {
-                line[lineLength] = '\0';
-                printf("The line is %s\n", line);
-                //line = realloc(line, lineLength*sizeof(char));
-                Node* head = createTokenList(line);
-                printf("getting here4\n");
-                manageCommands(head);
-                printf("getting here6\n");
-                lineLength = 0;
-            }
-            else {
-                line[lineLength++] = buffer[i];
-            }
+    while (1) {
+        if (interactive) {
+            printf("mysh> ");
+            fflush(stdout);
         }
 
-        //if(interactive){printf("Exiting Shell");}
+        ssize_t bytes_read = read(fd, buffer, BUFFER_SIZE - 1);
+        if (bytes_read <= 0) {
+            break;
+        }
+
+        buffer[bytes_read] = '\0';
+
+        for (ssize_t i = 0; i < bytes_read; i++) {
+            char c = buffer[i];
+            if (c == '\n' || c == '\0') { // End of line
+                line[lineLength] = '\0';
+
+                Node* head = createTokenList(line);
+                if (head) {
+                    manageCommands(head);
+                    freeTokenList(head);
+                }
+
+                lineLength = 0;
+            } else {
+                if (lineLength >= lineCapacity - 1) {
+                    lineCapacity *= 2;
+                    line = realloc(line, lineCapacity * sizeof(char));
+                    if (!line) {
+                        perror("Failed to reallocate memory for line");
+                        exit(1);
+                    }
+                }
+                line[lineLength++] = c;
+            }
+        }
+    }
+
+    free(line);
+    if (fd != STDIN_FILENO) {
+        close(fd);
     }
 
     return EXIT_SUCCESS;
