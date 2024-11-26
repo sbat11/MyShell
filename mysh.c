@@ -172,7 +172,7 @@ void manageCommands(Node* head) {
         }
     } else if (strcmp(command, "exit") == 0) {
         exit(0);
-    } else {
+    } else {  // Handle external commands
         char* executablePath = NULL;
 
         // If the command contains a slash, treat it as a direct path
@@ -206,8 +206,7 @@ void manageCommands(Node* head) {
             }
 
             free(argv);
-        } 
-        else {
+        } else {
             fprintf(stderr, "%s: command not found\n", command);
         }
     }
