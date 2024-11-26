@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #define BUFFER_SIZE 1024
 
@@ -44,8 +45,6 @@ int getListSize(Node* head) {
 Node* createTokenList(char* line) {
     Node* head = NULL;
     Node* ptr = NULL;
-
-    int inWord = 0;
     int wordLength = 0;
     int wordCapacity = BUFFER_SIZE;
     char* word = (char*)malloc(wordCapacity * sizeof(char));
@@ -57,14 +56,49 @@ Node* createTokenList(char* line) {
     for (int i = 0; i <= strlen(line); i++) {
         char c = line[i];
 
-        if ((c == ' ' || c == '\0') && inWord) { // End of a word
-            word[wordLength] = '\0';
+        if (c == ' ' || c == '\0') {  // End of a token
+            if (wordLength > 0) {  // Only add non-empty tokens
+                word[wordLength] = '\0';
+                Node* newNode = createNode(word);
+                if (!newNode) {
+                    free(word);
+                    return NULL;
+                }
+                if (head == NULL) {
+                    head = newNode;
+                    ptr = head;
+                } else {
+                    ptr->next = newNode;
+                    ptr = ptr->next;
+                }
+                wordLength = 0;  // Reset for the next word
+            }
+        } else if (c == '<' || c == '>' || c == '|') {  // Special tokens
+            if (wordLength > 0) {  // Add the previous token first
+                word[wordLength] = '\0';
+                Node* newNode = createNode(word);
+                if (!newNode) {
+                    free(word);
+                    return NULL;
+                }
+                if (head == NULL) {
+                    head = newNode;
+                    ptr = head;
+                } else {
+                    ptr->next = newNode;
+                    ptr = ptr->next;
+                }
+                wordLength = 0;
+            }
+
+            // Add the special token
+            word[0] = c;
+            word[1] = '\0';
             Node* newNode = createNode(word);
             if (!newNode) {
                 free(word);
                 return NULL;
             }
-
             if (head == NULL) {
                 head = newNode;
                 ptr = head;
@@ -72,11 +106,8 @@ Node* createTokenList(char* line) {
                 ptr->next = newNode;
                 ptr = ptr->next;
             }
-
-            inWord = 0;
-            wordLength = 0;
-        } else if (c != ' ' && c != '\0') { // Part of a word
-            if (wordLength >= wordCapacity - 1) {
+        } else {  // Part of a regular token
+            if (wordLength >= wordCapacity - 1) {  // Resize if needed
                 wordCapacity *= 2;
                 word = realloc(word, wordCapacity * sizeof(char));
                 if (!word) {
@@ -85,11 +116,10 @@ Node* createTokenList(char* line) {
                 }
             }
             word[wordLength++] = c;
-            inWord = 1;
         }
     }
 
-    free(word); // Free temporary word buffer
+    free(word);
     return head;
 }
 
@@ -102,7 +132,19 @@ void freeTokenList(Node* head) {
         free(temp);
     }
 }
+char* findExecutablePath(const char* command) {
+    // List of directories to search
+    const char* searchPaths[] = {"/usr/local/bin", "/usr/bin", "/bin"};
+    static char fullPath[BUFFER_SIZE];  // To store the full path of the executable
 
+    for (int i = 0; i < 3; i++) {
+        snprintf(fullPath, BUFFER_SIZE, "%s/%s", searchPaths[i], command);
+        if (access(fullPath, X_OK) == 0) {  // Check if the file is executable
+            return fullPath;
+        }
+    }
+    return NULL;  // Command not found
+}
 void manageCommands(Node* head) {
     if (head == NULL) {
         printf("head is NULL\n");
@@ -131,10 +173,45 @@ void manageCommands(Node* head) {
     } else if (strcmp(command, "exit") == 0) {
         exit(0);
     } else {
-        printf("Command not recognized: %s\n", command);
+        char* executablePath = NULL;
+
+        // If the command contains a slash, treat it as a direct path
+        if (strchr(command, '/') != NULL) {
+            executablePath = command;
+        } else {  // Search for bare names
+            executablePath = findExecutablePath(command);
+        }
+
+        if (executablePath != NULL) {
+            // Build argument list
+            int argc = getListSize(head);
+            char** argv = (char**)malloc((argc + 1) * sizeof(char*));
+            Node* current = head;
+            for (int i = 0; i < argc; i++) {
+                argv[i] = current->word;
+                current = current->next;
+            }
+            argv[argc] = NULL;  // Null-terminate the argument list
+
+            // Fork and execute
+            pid_t pid = fork();
+            if (pid == 0) {  // Child process
+                execv(executablePath, argv);
+                perror("execv");  // If execv fails
+                exit(1);
+            } else if (pid > 0) {  // Parent process
+                wait(NULL);  // Wait for child process to complete
+            } else {
+                perror("fork");
+            }
+
+            free(argv);
+        } 
+        else {
+            fprintf(stderr, "%s: command not found\n", command);
+        }
     }
 }
-
 int main(int argc, char* argv[]) {
     if (argc > 2) {
         fprintf(stderr, "Usage: %s [file]\n", argv[0]);
