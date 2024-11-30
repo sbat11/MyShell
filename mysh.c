@@ -132,28 +132,116 @@ void freeTokenList(Node* head) {
         free(temp);
     }
 }
+
 char* findExecutablePath(const char* command) {
     // List of directories to search
     const char* searchPaths[] = {"/usr/local/bin", "/usr/bin", "/bin"};
     static char fullPath[BUFFER_SIZE];  // To store the full path of the executable
 
     for (int i = 0; i < 3; i++) {
-        snprintf(fullPath, BUFFER_SIZE, "%s/%s", searchPaths[i], command);
+        // printf(fullPath, BUFFER_SIZE, "%s/%s", searchPaths[i], command);
         if (access(fullPath, X_OK) == 0) {  // Check if the file is executable
             return fullPath;
         }
     }
     return NULL;  // Command not found
 }
-void manageCommands(Node* head) {
-    if (head == NULL) {
-        printf("head is NULL\n");
+
+void executeCommand(Node* head) {
+    if (!head) return;
+    char* command = head->word;
+    char* inputFile = NULL;
+    char* outputFile = NULL;
+
+    // Parse redirection tokens
+    Node* current = head;
+    Node* prev = NULL;
+    while (current != NULL) {
+        if (strcmp(current->word, "<") == 0) {  // Input redirection
+            if (current->next) {
+                inputFile = current->next->word;
+                if (prev) prev->next = current->next->next;
+                else head = current->next->next;
+                free(current->word);
+                free(current);
+                current = (prev) ? prev->next : head;
+                continue;
+            } else {
+                fprintf(stderr, "Error: Missing input file for redirection\n");
+                exit(1);
+            }
+        } else if (strcmp(current->word, ">") == 0) {  // Output redirection
+            if (current->next) {
+                outputFile = current->next->word;
+                if (prev) prev->next = current->next->next;
+                else head = current->next->next;
+                free(current->word);
+                free(current);
+                current = (prev) ? prev->next : head;
+                continue;
+            } else {
+                fprintf(stderr, "Error: Missing output file for redirection\n");
+                exit(1);
+            }
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    // Build argument list
+    int argc = getListSize(head);
+    char** argv = malloc((argc + 1) * sizeof(char*));
+    current = head;
+    for (int i = 0; i < argc; i++) {
+        argv[i] = current->word;
+        current = current->next;
+    }
+    argv[argc] = NULL;
+
+    // Handle redirection
+    if (inputFile) {
+        int fd = open(inputFile, O_RDONLY);
+        if (fd < 0) {
+            perror("Failed to open input file");
+            exit(1);
+        }
+        dup2(fd, STDIN_FILENO);
+        close(fd);
+    }
+
+    if (outputFile) {
+        int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+        if (fd < 0) {
+            perror("Failed to open output file");
+            exit(1);
+        }
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+    }
+
+    // Execute the command
+    char* executablePath = command;
+    
+    if (strchr(command, '/') == NULL){
+        executablePath = findExecutablePath(command);
+    }
+
+    if (!executablePath) {
+        fprintf(stderr, "%s: command not found\n", command);
         return;
     }
-    printf("Command is: %s\n", head->word);
+
+    execv(executablePath, argv);
+    perror("execv failed");  // Should not reach here
+    return;
+}
+
+void handleCommands(Node* head, int interactive) {
+    if (!head) return;
 
     char* command = head->word;
 
+    // Check if the command is built-in
     if (strcmp(command, "cd") == 0) {
         if (getListSize(head) != 2) {
             fprintf(stderr, "cd: only one file name as argument.\n");
@@ -170,47 +258,88 @@ void manageCommands(Node* head) {
         } else {
             perror("pwd");
         }
+    } else if (strcmp(command, "which") == 0) {
+        char* path = findExecutablePath(command);
+        if (path != NULL) {
+            printf("%s", path);
+        }
+
     } else if (strcmp(command, "exit") == 0) {
+
+        if (interactive) {
+            printf("Exiting my shell.\n");
+        }
         exit(0);
-    } else {  // Handle external commands
-        char* executablePath = NULL;
-
-        // If the command contains a slash, treat it as a direct path
-        if (strchr(command, '/') != NULL) {
-            executablePath = command;
-        } else {  // Search for bare names
-            executablePath = findExecutablePath(command);
-        }
-
-        if (executablePath != NULL) {
-            // Build argument list
-            int argc = getListSize(head);
-            char** argv = (char**)malloc((argc + 1) * sizeof(char*));
-            Node* current = head;
-            for (int i = 0; i < argc; i++) {
-                argv[i] = current->word;
-                current = current->next;
-            }
-            argv[argc] = NULL;  // Null-terminate the argument list
-
-            // Fork and execute
-            pid_t pid = fork();
-            if (pid == 0) {  // Child process
-                execv(executablePath, argv);
-                perror("execv");  // If execv fails
-                exit(1);
-            } else if (pid > 0) {  // Parent process
-                wait(NULL);  // Wait for child process to complete
-            } else {
-                perror("fork");
-            }
-
-            free(argv);
-        } else {
-            fprintf(stderr, "%s: command not found\n", command);
-        }
+    } else {
+        executeCommand(head);
     }
 }
+
+void executePipe(Node* firstCommand, Node* secondCommand) {
+    int pipefd[2];  // Pipe file descriptors
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(1);
+    }
+
+    pid_t pid1 = fork();
+    if (pid1 == 0) {  // First child process
+        close(pipefd[0]);           // Close read end of the pipe
+        dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
+        close(pipefd[1]);           // Close pipe write end after duplication
+
+        executeCommand(firstCommand);  // Execute the first command
+        exit(1);  // Should not reach here if execv succeeds
+    }
+
+    pid_t pid2 = fork();
+    if (pid2 == 0) {  // Second child process
+        close(pipefd[1]);           // Close write end of the pipe
+        dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
+        close(pipefd[0]);           // Close pipe read end after duplication
+
+        executeCommand(secondCommand);  // Execute the second command
+        exit(1);  // Should not reach here if execv succeeds
+    }
+
+    // Parent process
+    close(pipefd[0]);  // Close both ends of the pipe
+    close(pipefd[1]);
+
+    int status1, status2;
+    waitpid(pid1, &status1, 0);  // Wait for the first child
+    waitpid(pid2, &status2, 0);  // Wait for the second child
+
+    if (WIFEXITED(status2)) {
+        printf("Last command exited with status %d\n", WEXITSTATUS(status2));
+    }
+}
+
+void manageCommands(Node* head, int interactive) {
+    if (head == NULL) {
+        printf("head is NULL\n");
+        return;
+    }
+
+    // Detect pipe in the command
+    Node* pipeNode = head;
+    while (pipeNode != NULL && strcmp(pipeNode->word, "|") != 0) {
+        pipeNode = pipeNode->next;
+    }
+
+    if (pipeNode != NULL) {  // Pipe detected
+        pipeNode->word = NULL;  // Split the token list
+        Node* secondCommand = pipeNode->next;
+        pipeNode->next = NULL;
+
+        executePipe(head, secondCommand);
+        return;
+    }
+
+    // Handle other commands (redirection, built-ins, etc.)
+    handleCommands(head, interactive);
+}
+
 int main(int argc, char* argv[]) {
     if (argc > 2) {
         fprintf(stderr, "Usage: %s [file]\n", argv[0]);
@@ -256,7 +385,7 @@ int main(int argc, char* argv[]) {
 
                 Node* head = createTokenList(line);
                 if (head) {
-                    manageCommands(head);
+                    manageCommands(head, interactive);
                     freeTokenList(head);
                 }
 
