@@ -203,6 +203,9 @@ void executeCommand(Node* head) {
         current = current->next;
     }
     argv[argc] = NULL;
+    
+    int originalStdin = dup(STDIN_FILENO);
+    int originalStdout = dup(STDOUT_FILENO);
 
     // Handle redirection
     if (inputFile) {
@@ -252,6 +255,11 @@ void executeCommand(Node* head) {
     } else {
         perror("fork failed");
     }
+    
+    dup2(originalStdin, STDIN_FILENO);
+    dup2(originalStdout, STDOUT_FILENO);
+    close(originalStdin);
+    close(originalStdout);
 
     free(argv);
 }
@@ -375,6 +383,7 @@ int main(int argc, char* argv[]) {
     }
 
     int interactive = isatty(fd);
+
     if (interactive) {
         printf("Welcome to my shell!\n");
     }
