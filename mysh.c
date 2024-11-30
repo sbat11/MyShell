@@ -134,14 +134,18 @@ void freeTokenList(Node* head) {
 }
 
 char* findExecutablePath(const char* command) {
-    // List of directories to search
-    const char* searchPaths[] = {"/usr/local/bin", "/usr/bin", "/bin"};
-    static char fullPath[BUFFER_SIZE];  // To store the full path of the executable
+    const char* searchPaths[] = {"/usr/local/bin", "/usr/bin", "/bin", NULL};
+    static char fullPath[BUFFER_SIZE];  // Buffer to store the full path
 
-    for (int i = 0; i < 3; i++) {
-        // printf(fullPath, BUFFER_SIZE, "%s/%s", searchPaths[i], command);
-        if (access(fullPath, X_OK) == 0) {  // Check if the file is executable
-            return fullPath;
+    for (int i = 0; searchPaths[i] != NULL; i++) {
+        fullPath[0] = '\0';
+        strcpy(fullPath, searchPaths[i]);
+        if (fullPath[strlen(fullPath) - 1] != '/') {
+            strcat(fullPath, "/");
+        }
+        strcat(fullPath, command);
+        if (access(fullPath, X_OK) == 0) {
+            return fullPath;  // Return if executable is found
         }
     }
     return NULL;  // Command not found
@@ -154,44 +158,46 @@ void executeCommand(Node* head) {
     char* outputFile = NULL;
 
     // Parse redirection tokens
-    Node* current = head;
+    Node* curr = head;
     Node* prev = NULL;
-    while (current != NULL) {
-        if (strcmp(current->word, "<") == 0) {  // Input redirection
-            if (current->next) {
-                inputFile = current->next->word;
-                if (prev) prev->next = current->next->next;
-                else head = current->next->next;
-                free(current->word);
-                free(current);
-                current = (prev) ? prev->next : head;
+    while (curr != NULL) {
+        if (strcmp(curr->word, "<") == 0) {  // Input redirection
+            if (curr->next) {
+                inputFile = curr->next->word;
+                if (prev) prev->next = curr->next->next;
+                else head = curr->next->next;
+                free(curr->word);
+                free(curr);
+                curr = (prev) ? prev->next : head;
                 continue;
             } else {
                 fprintf(stderr, "Error: Missing input file for redirection\n");
                 exit(1);
             }
-        } else if (strcmp(current->word, ">") == 0) {  // Output redirection
-            if (current->next) {
-                outputFile = current->next->word;
-                if (prev) prev->next = current->next->next;
-                else head = current->next->next;
-                free(current->word);
-                free(current);
-                current = (prev) ? prev->next : head;
+        } else if (strcmp(curr->word, ">") == 0) {  // Output redirection
+            if (curr->next) {
+                outputFile = curr->next->word;
+                if (prev) prev->next = curr->next->next;
+                else head = curr->next->next;
+                free(curr->word);
+                free(curr);
+                curr = (prev) ? prev->next : head;
                 continue;
             } else {
                 fprintf(stderr, "Error: Missing output file for redirection\n");
                 exit(1);
             }
         }
-        prev = current;
-        current = current->next;
+        prev = curr;
+        curr = curr->next;
     }
+    // Handle redirections 
+
 
     // Build argument list
     int argc = getListSize(head);
-    char** argv = malloc((argc + 1) * sizeof(char*));
-    current = head;
+    char** argv = malloc((argc + 1) * sizeof(char));
+    Node* current = head;
     for (int i = 0; i < argc; i++) {
         argv[i] = current->word;
         current = current->next;
@@ -219,21 +225,35 @@ void executeCommand(Node* head) {
         close(fd);
     }
 
-    // Execute the command
+    // Handle bare names
     char* executablePath = command;
-    
-    if (strchr(command, '/') == NULL){
+    if (!strchr(command, '/')) {  // If it's a bare name
         executablePath = findExecutablePath(command);
     }
 
     if (!executablePath) {
         fprintf(stderr, "%s: command not found\n", command);
-        return;
+        free(argv);
+        return;  // Do not call execv or exit; return to shell loop
     }
 
-    execv(executablePath, argv);
-    perror("execv failed");  // Should not reach here
-    return;
+    // Fork and execute
+    pid_t pid = fork();
+    if (pid == 0) {  // Child process
+        execv(executablePath, argv);
+        perror("execv failed");  // If execv fails
+        exit(1);
+    } else if (pid > 0) {  // Parent process
+        int status;
+        waitpid(pid, &status, 0);  // Wait for child process
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
+        }
+    } else {
+        perror("fork failed");
+    }
+
+    free(argv);
 }
 
 void handleCommands(Node* head, int interactive) {
@@ -336,7 +356,6 @@ void manageCommands(Node* head, int interactive) {
         return;
     }
 
-    // Handle other commands (redirection, built-ins, etc.)
     handleCommands(head, interactive);
 }
 
