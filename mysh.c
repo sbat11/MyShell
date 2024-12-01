@@ -4,6 +4,9 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdbool.h>
+#include <dirent.h>
+
 
 #define BUFFER_SIZE 512
 
@@ -30,6 +33,130 @@ Node* createNode(char* word) {
 
     node->next = NULL;
     return node;
+}
+bool matchesWildcard(const char* fileName, const char* pattern) {
+    char* star = strchr(pattern, '*');
+    if (!star) {
+        return strcmp(fileName, pattern) == 0;  // Exact match
+    }
+
+    // Split into prefix and suffix
+    int prefixLen = star - pattern;
+    const char* suffix = star + 1;
+
+    // Match prefix
+    if (strncmp(fileName, pattern, prefixLen) != 0) {
+        return false;
+    }
+
+    // Match suffix
+    int fileNameLen = strlen(fileName);
+    int suffixLen = strlen(suffix);
+    if (fileNameLen < prefixLen + suffixLen) {
+        return false;
+    }
+
+    return strcmp(fileName + fileNameLen - suffixLen, suffix) == 0;
+}
+Node* expandWildcard(const char* token) {
+    char* star = strchr(token, '*');
+    if (!star) {
+        return createNode((char*)token);  // No wildcard, return original
+    }
+
+    // Separate directory and pattern
+    char dirPath[BUFFER_SIZE] = ".";
+    const char* pattern = token;
+
+    char* slash = strrchr(token, '/');
+    if (slash) {
+        strncpy(dirPath, token, slash - token);
+        dirPath[slash - token] = '\0';
+        pattern = slash + 1;
+    }
+
+    DIR* dir = opendir(dirPath);
+    if (!dir) {
+        perror("opendir");
+        return createNode((char*)token);  // Return token unchanged
+    }
+
+    struct dirent* entry;
+    Node* head = NULL;
+    Node* tail = NULL;
+
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip hidden files unless explicitly matched
+        if (entry->d_name[0] == '.' && pattern[0] != '.') {
+            continue;
+        }
+
+        if (matchesWildcard(entry->d_name, pattern)) {
+            // Build fullPath using strcpy and strcat
+            char fullPath[BUFFER_SIZE];
+            if (strlen(dirPath) + strlen(entry->d_name) + 2 > BUFFER_SIZE) {  // Ensure it fits
+                fprintf(stderr, "Path too long: %s/%s\n", dirPath, entry->d_name);
+                continue;
+            }
+
+            fullPath[0] = '\0';  // Clear the buffer
+            strcpy(fullPath, dirPath);  // Copy dirPath
+            strcat(fullPath, "/");      // Append the slash
+            strcat(fullPath, entry->d_name);  // Append the file name
+
+            Node* newNode = createNode(fullPath);
+            if (!newNode) {
+                perror("Failed to create node");
+                continue;
+            }
+
+            if (!head) {
+                head = newNode;
+                tail = newNode;
+            } else {
+                tail->next = newNode;
+                tail = newNode;
+            }
+        }
+    }
+
+    closedir(dir);
+
+    if (!head) {
+        return createNode((char*)token);  // No matches, return token unchanged
+    }
+
+    return head;
+}
+Node* expandTokenList(Node* head) {
+    Node* newHead = NULL;
+    Node* newTail = NULL;
+
+    while (head) {
+        Node* expanded = expandWildcard(head->word);
+        Node* temp = head;
+        head = head->next;
+
+        if (expanded) {
+            if (!newHead) {
+                newHead = expanded;
+                newTail = expanded;
+                while (newTail->next) {
+                    newTail = newTail->next;
+                }
+            } else {
+                newTail->next = expanded;
+                while (newTail->next) {
+                    newTail = newTail->next;
+                }
+            }
+        }
+
+        free(temp->word);
+        free(temp);
+    }
+
+    return newHead;
 }
 
 int getListSize(Node* head) {
@@ -133,20 +260,11 @@ void freeTokenList(Node* head) {
     while (head != NULL) {
         temp = head;
         head = head->next;
-        free(temp->word);
+        if(temp -> word){
+            free(temp->word);
+        }
         free(temp);
     }
-
-    /*
-    Node* ptr = head;
-
-    while (head != NULL) {
-        Node* temp = ptr;
-        ptr = ptr->next;
-        free(temp->word);
-        free(temp);
-    }
-    */
 }
 
 char* findExecutablePath(const char* command) {
@@ -405,6 +523,8 @@ void manageCommands(Node* head) {
     if (head == NULL) {
         return;
     }
+
+    head = expandTokenList(head);
 
     // Detect pipe in the command
     Node* prev = NULL;
