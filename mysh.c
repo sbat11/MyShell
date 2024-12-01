@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 512
 
 int interactive = 0;
 
@@ -373,7 +373,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
         close(pipefd[1]);           // Close pipe write end after duplication
 
-        handleCommands(firstCommand);  // Execute the first command
+        executeCommand(firstCommand);  // Execute the first command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -383,7 +383,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
         close(pipefd[0]);           // Close pipe read end after duplication
 
-        handleCommands(secondCommand);  // Execute the second command
+        executeCommand(secondCommand);  // Execute the second command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -429,9 +429,10 @@ void manageCommands(Node* head) {
         executePipe(head, secondCommand);
         return;
     }
-
     // if no pipe in the line handle normally
-    handleCommands(head);
+    else{
+        handleCommands(head);
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -482,7 +483,6 @@ int main(int argc, char* argv[]) {
                 Node* head = createTokenList(line);
                 if (head) {
                     manageCommands(head);
-                    //freeTokenList(head);
                 }
 
                 lineLength = 0;
