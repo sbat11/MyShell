@@ -7,6 +7,8 @@
 
 #define BUFFER_SIZE 1024
 
+int interactive = 0;
+
 typedef struct Node {
     char* word;
     struct Node* next;
@@ -48,6 +50,7 @@ Node* createTokenList(char* line) {
     int wordLength = 0;
     int wordCapacity = BUFFER_SIZE;
     char* word = (char*)malloc(wordCapacity * sizeof(char));
+
     if (!word) {
         perror("Failed to allocate memory for word");
         return NULL;
@@ -56,8 +59,8 @@ Node* createTokenList(char* line) {
     for (int i = 0; i <= strlen(line); i++) {
         char c = line[i];
 
-        if (c == ' ' || c == '\0') {  // End of a token
-            if (wordLength > 0) {  // Only add non-empty tokens
+        if (c == ' ' || c == '\0' || c == '\n') {
+            if (wordLength > 0) { 
                 word[wordLength] = '\0';
                 Node* newNode = createNode(word);
                 if (!newNode) {
@@ -71,7 +74,8 @@ Node* createTokenList(char* line) {
                     ptr->next = newNode;
                     ptr = ptr->next;
                 }
-                wordLength = 0;  // Reset for the next word
+
+                wordLength = 0;
             }
         } else if (c == '<' || c == '>' || c == '|') {  // Special tokens
             if (wordLength > 0) {  // Add the previous token first
@@ -99,6 +103,7 @@ Node* createTokenList(char* line) {
                 free(word);
                 return NULL;
             }
+            
             if (head == NULL) {
                 head = newNode;
                 ptr = head;
@@ -131,6 +136,17 @@ void freeTokenList(Node* head) {
         free(temp->word);
         free(temp);
     }
+
+    /*
+    Node* ptr = head;
+
+    while (head != NULL) {
+        Node* temp = ptr;
+        ptr = ptr->next;
+        free(temp->word);
+        free(temp);
+    }
+    */
 }
 
 char* findExecutablePath(const char* command) {
@@ -153,22 +169,33 @@ char* findExecutablePath(const char* command) {
 
 void executeCommand(Node* head) {
     if (!head) return;
-    char* command = head->word;
+
     char* inputFile = NULL;
     char* outputFile = NULL;
-
+    // < hello.txt cat a.txt
     // Parse redirection tokens
-    Node* curr = head;
+
     Node* prev = NULL;
+    Node* curr = head;
     while (curr != NULL) {
         if (strcmp(curr->word, "<") == 0) {  // Input redirection
             if (curr->next) {
-                inputFile = curr->next->word;
-                if (prev) prev->next = curr->next->next;
-                else head = curr->next->next;
-                free(curr->word);
-                free(curr);
-                curr = (prev) ? prev->next : head;
+                inputFile = strdup(curr->next->word);
+
+                Node* temp = curr;
+                curr = curr->next->next;
+
+                // Free redirection token and file
+                free(temp->next->word);
+                free(temp->next);
+                free(temp->word);
+                free(temp);
+
+                if (prev) {
+                    prev->next = curr;
+                } else {
+                    head = curr;  // Update head if the first node is removed
+                }
                 continue;
             } else {
                 fprintf(stderr, "Error: Missing input file for redirection\n");
@@ -176,30 +203,42 @@ void executeCommand(Node* head) {
             }
         } else if (strcmp(curr->word, ">") == 0) {  // Output redirection
             if (curr->next) {
-                outputFile = curr->next->word;
-                if (prev) prev->next = curr->next->next;
-                else head = curr->next->next;
-                free(curr->word);
-                free(curr);
-                curr = (prev) ? prev->next : head;
+                outputFile = strdup(curr->next->word);
+
+                Node* temp = curr;
+                curr = curr->next->next;
+
+                // Free redirection token and file
+                free(temp->next->word);
+                free(temp->next);
+                free(temp->word);
+                free(temp);
+
+                if (prev) {
+                    prev->next = curr;
+                } else {
+                    head = curr;  // Update head if the first node is removed
+                }
                 continue;
             } else {
                 fprintf(stderr, "Error: Missing output file for redirection\n");
                 exit(1);
             }
         }
+
         prev = curr;
         curr = curr->next;
+        
     }
-    // Handle redirections 
-
+    
+    char* command = head->word;
 
     // Build argument list
     int argc = getListSize(head);
-    char** argv = malloc((argc + 1) * sizeof(char));
+    char** argv = malloc((argc + 1) * sizeof(char*));
     Node* current = head;
     for (int i = 0; i < argc; i++) {
-        argv[i] = current->word;
+        argv[i] = strdup(current->word);
         current = current->next;
     }
     argv[argc] = NULL;
@@ -207,7 +246,7 @@ void executeCommand(Node* head) {
     int originalStdin = dup(STDIN_FILENO);
     int originalStdout = dup(STDOUT_FILENO);
 
-    // Handle redirection
+    // Handle input redirection
     if (inputFile) {
         int fd = open(inputFile, O_RDONLY);
         if (fd < 0) {
@@ -216,8 +255,10 @@ void executeCommand(Node* head) {
         }
         dup2(fd, STDIN_FILENO);
         close(fd);
+        free(inputFile);
     }
 
+    // Handle output redirection
     if (outputFile) {
         int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
         if (fd < 0) {
@@ -226,16 +267,22 @@ void executeCommand(Node* head) {
         }
         dup2(fd, STDOUT_FILENO);
         close(fd);
+        free(outputFile);
     }
 
-    // Handle bare names
+    // Find path of executable used for execv()
+
     char* executablePath = command;
-    if (!strchr(command, '/')) {  // If it's a bare name
+    if (strchr(command, '/') == NULL) {  // Bare name (doesn't contain '/')
         executablePath = findExecutablePath(command);
     }
 
+    // Command not found
     if (!executablePath) {
         fprintf(stderr, "%s: command not found\n", command);
+        for (int i = 0; i < argc; i++) {
+            free(argv[i]);  
+        }
         free(argv);
         return;  // Do not call execv or exit; return to shell loop
     }
@@ -261,10 +308,13 @@ void executeCommand(Node* head) {
     close(originalStdin);
     close(originalStdout);
 
+    for (int i = 0; i < argc; i++) {
+        free(argv[i]);  
+    }
     free(argv);
 }
 
-void handleCommands(Node* head, int interactive) {
+void handleCommands(Node* head) {
     if (!head) return;
 
     char* command = head->word;
@@ -289,11 +339,16 @@ void handleCommands(Node* head, int interactive) {
     } else if (strcmp(command, "which") == 0) {
         char* path = findExecutablePath(command);
         if (path != NULL) {
-            printf("%s", path);
+            printf("%s\n", path);
         }
 
     } else if (strcmp(command, "exit") == 0) {
-
+        Node* ptr = head->next;
+        while (ptr != NULL) {
+            printf("%s ", ptr->word);
+            ptr = ptr->next;
+        }
+        printf("\n");
         if (interactive) {
             printf("Exiting my shell.\n");
         }
@@ -301,6 +356,8 @@ void handleCommands(Node* head, int interactive) {
     } else {
         executeCommand(head);
     }
+    
+    freeTokenList(head);
 }
 
 void executePipe(Node* firstCommand, Node* secondCommand) {
@@ -316,7 +373,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
         close(pipefd[1]);           // Close pipe write end after duplication
 
-        executeCommand(firstCommand);  // Execute the first command
+        handleCommands(firstCommand);  // Execute the first command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -326,7 +383,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
         close(pipefd[0]);           // Close pipe read end after duplication
 
-        executeCommand(secondCommand);  // Execute the second command
+        handleCommands(secondCommand);  // Execute the second command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -343,28 +400,38 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
     }
 }
 
-void manageCommands(Node* head, int interactive) {
+// Checks if command has a pipe and calls functions to handle it
+void manageCommands(Node* head) {
     if (head == NULL) {
-        printf("head is NULL\n");
         return;
     }
 
     // Detect pipe in the command
+    Node* prev = NULL;
     Node* pipeNode = head;
     while (pipeNode != NULL && strcmp(pipeNode->word, "|") != 0) {
+        prev = pipeNode;
         pipeNode = pipeNode->next;
     }
 
+    // If prev is NULL that means pipe is first token so throw an error
+    if (prev == NULL) {
+        fprintf(stderr, "Error: Pipe must connect two commands\n");
+    }
+
+    // handle pipe
     if (pipeNode != NULL) {  // Pipe detected
-        pipeNode->word = NULL;  // Split the token list
+        prev->next = NULL;
         Node* secondCommand = pipeNode->next;
-        pipeNode->next = NULL;
+        free(pipeNode->word);
+        free(pipeNode);
 
         executePipe(head, secondCommand);
         return;
     }
 
-    handleCommands(head, interactive);
+    // if no pipe in the line handle normally
+    handleCommands(head);
 }
 
 int main(int argc, char* argv[]) {
@@ -374,6 +441,7 @@ int main(int argc, char* argv[]) {
     }
 
     int fd = STDIN_FILENO;
+
     if (argc == 2) {
         fd = open(argv[1], O_RDONLY);
         if (fd < 0) {
@@ -382,17 +450,17 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    int interactive = isatty(fd);
+    interactive = isatty(fd);
 
     if (interactive) {
         printf("Welcome to my shell!\n");
     }
 
     char buffer[BUFFER_SIZE];
-    char* line = (char*)malloc(BUFFER_SIZE * sizeof(char));
-    int lineLength = 0;
     int lineCapacity = BUFFER_SIZE;
-
+    char* line = (char*)malloc(lineCapacity * sizeof(char));
+    int lineLength = 0;
+    
     while (1) {
         if (interactive) {
             printf("mysh> ");
@@ -408,13 +476,13 @@ int main(int argc, char* argv[]) {
 
         for (ssize_t i = 0; i < bytes_read; i++) {
             char c = buffer[i];
-            if (c == '\n' || c == '\0') { // End of line
+            if (c == '\n') { // End of line
                 line[lineLength] = '\0';
 
                 Node* head = createTokenList(line);
                 if (head) {
-                    manageCommands(head, interactive);
-                    freeTokenList(head);
+                    manageCommands(head);
+                    //freeTokenList(head);
                 }
 
                 lineLength = 0;
