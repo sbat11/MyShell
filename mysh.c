@@ -290,19 +290,18 @@ void executeCommandNoFork(Node* head) {
     char* inputFile = NULL;
     char* outputFile = NULL;
     // < hello.txt cat a.txt
-    // Parse redirection tokens
+    // parse redirection tokens
 
     Node* prev = NULL;
     Node* curr = head;
     while (curr != NULL) {
-        if (strcmp(curr->word, "<") == 0) {  // Input redirection
+        if (strcmp(curr->word, "<") == 0) {  // input redirection
             if (curr->next) {
                 inputFile = strdup(curr->next->word);
 
                 Node* temp = curr;
                 curr = curr->next->next;
 
-                // Free redirection token and file
                 free(temp->next->word);
                 free(temp->next);
                 free(temp->word);
@@ -311,7 +310,7 @@ void executeCommandNoFork(Node* head) {
                 if (prev) {
                     prev->next = curr;
                 } else {
-                    head = curr;  // Update head if the first node is removed
+                    head = curr;  
                 }
                 continue;
             } else {
@@ -325,7 +324,6 @@ void executeCommandNoFork(Node* head) {
                 Node* temp = curr;
                 curr = curr->next->next;
 
-                // Free redirection token and file
                 free(temp->next->word);
                 free(temp->next);
                 free(temp->word);
@@ -334,7 +332,7 @@ void executeCommandNoFork(Node* head) {
                 if (prev) {
                     prev->next = curr;
                 } else {
-                    head = curr;  // Update head if the first node is removed
+                    head = curr;  
                 }
                 continue;
             } else {
@@ -350,7 +348,7 @@ void executeCommandNoFork(Node* head) {
     
     char* command = head->word;
 
-    // Build argument list
+    // build argument list
     int argc = getListSize(head);
     char** argv = malloc((argc + 1) * sizeof(char*));
     Node* current = head;
@@ -363,7 +361,7 @@ void executeCommandNoFork(Node* head) {
     int originalStdin = dup(STDIN_FILENO);
     int originalStdout = dup(STDOUT_FILENO);
 
-    // Handle input redirection
+    // handle input redirection
     if (inputFile) {
         int fd = open(inputFile, O_RDONLY);
         if (fd < 0) {
@@ -375,7 +373,7 @@ void executeCommandNoFork(Node* head) {
         free(inputFile);
     }
 
-    // Handle output redirection
+    // handle output redirection
     if (outputFile) {
         int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
         if (fd < 0) {
@@ -387,47 +385,25 @@ void executeCommandNoFork(Node* head) {
         free(outputFile);
     }
 
-    // Find path of executable used for execv()
-
     char* executablePath = command;
-    if (strchr(command, '/') == NULL) {  // Bare name (doesn't contain '/')
+    if (strchr(command, '/') == NULL) {  // barename
         executablePath = findExecutablePath(command);
     }
 
-    // Command not found
     if (!executablePath) {
         fprintf(stderr, "%s: command not found\n", command);
         for (int i = 0; i < argc; i++) {
             free(argv[i]);  
         }
         free(argv);
-        exit(127);  // Do not call execv or exit; return to shell loop
+        exit(127);  
     }
-
-    // Fork and execute
-    // pid_t pid = fork();
-    // if (pid == 0) {  // Child process
-    //     execv(executablePath, argv);
-    //     perror("execv failed");  // If execv fails
-    //     exit(1);
-    // } else if (pid > 0) {  // Parent process
-    //     int status;
-    //     waitpid(pid, &status, 0);  // Wait for child process
-    //     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-    //         fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
-    //     }
-    // } else {
-    //     perror("fork failed");
-    // }
     
     dup2(originalStdin, STDIN_FILENO);
     dup2(originalStdout, STDOUT_FILENO);
     close(originalStdin);
     close(originalStdout);
 
-    // for (int i = 0; i < argc; i++) {
-    //     free(argv[i]);  
-    // }
     execv(executablePath, argv);
     perror("execv failed");
     free(argv);
@@ -438,19 +414,18 @@ void executeCommand(Node* head) {
     char* inputFile = NULL;
     char* outputFile = NULL;
     // < hello.txt cat a.txt
-    // Parse redirection tokens
+    // parse redirection tokens
 
     Node* prev = NULL;
     Node* curr = head;
     while (curr != NULL) {
-        if (strcmp(curr->word, "<") == 0) {  // Input redirection
+        if (strcmp(curr->word, "<") == 0) {  // input 
             if (curr->next) {
                 inputFile = strdup(curr->next->word);
 
                 Node* temp = curr;
                 curr = curr->next->next;
 
-                // Free redirection token and file
                 free(temp->next->word);
                 free(temp->next);
                 free(temp->word);
@@ -459,21 +434,20 @@ void executeCommand(Node* head) {
                 if (prev) {
                     prev->next = curr;
                 } else {
-                    head = curr;  // Update head if the first node is removed
+                    head = curr;  
                 }
                 continue;
             } else {
                 fprintf(stderr, "Error: Missing input file for redirection\n");
                 exit(1);
             }
-        } else if (strcmp(curr->word, ">") == 0) {  // Output redirection
+        } else if (strcmp(curr->word, ">") == 0) {  // output
             if (curr->next) {
                 outputFile = strdup(curr->next->word);
 
                 Node* temp = curr;
                 curr = curr->next->next;
 
-                // Free redirection token and file
                 free(temp->next->word);
                 free(temp->next);
                 free(temp->word);
@@ -498,7 +472,7 @@ void executeCommand(Node* head) {
     
     char* command = head->word;
 
-    // Build argument list
+    // build argument list
     int argc = getListSize(head);
     char** argv = malloc((argc + 1) * sizeof(char*));
     Node* current = head;
@@ -511,7 +485,7 @@ void executeCommand(Node* head) {
     int originalStdin = dup(STDIN_FILENO);
     int originalStdout = dup(STDOUT_FILENO);
 
-    // Handle input redirection
+    // input file redirection
     if (inputFile) {
         int fd = open(inputFile, O_RDONLY);
         if (fd < 0) {
@@ -523,7 +497,7 @@ void executeCommand(Node* head) {
         free(inputFile);
     }
 
-    // Handle output redirection
+    // output file redirection
     if (outputFile) {
         int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
         if (fd < 0) {
@@ -535,33 +509,31 @@ void executeCommand(Node* head) {
         free(outputFile);
     }
 
-    // Find path of executable used for execv()
+    // find path of executable
 
     char* executablePath = command;
-    if (strchr(command, '/') == NULL) {  // Bare name (doesn't contain '/')
+    if (strchr(command, '/') == NULL) {  
         executablePath = findExecutablePath(command);
     }
 
-    // Command not found
     if (!executablePath) {
         fprintf(stderr, "%s: command not found\n", command);
         for (int i = 0; i < argc; i++) {
             free(argv[i]);  
         }
         free(argv);
-        return;  // Do not call execv or exit; return to shell loop
+        return; 
     }
 
-    // Fork and execute
     pid_t pid = fork();
-    if (pid == 0) {  // Child process
+    if (pid == 0) { 
         execv(executablePath, argv);
-        perror("execv failed");  // If execv fails
+        perror("execv failed");  
         exit(1);
-    } else if (pid > 0) {  // Parent process
+    } else if (pid > 0) {  
         int status;
-        waitpid(pid, &status, 0);  // Wait for child process
-        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        waitpid(pid, &status, 0);  
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
             fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
         }
     } else {
@@ -626,39 +598,39 @@ void handleCommands(Node* head) {
 }
 
 void executePipe(Node* firstCommand, Node* secondCommand) {
-    int pipefd[2];  // Pipe file descriptors
+    int pipefd[2];  
     if (pipe(pipefd) == -1) {
         perror("pipe");
         exit(1);
     }
 
     pid_t pid1 = fork();
-    if (pid1 == 0) {  // First child process
-        close(pipefd[0]);           // Close read end of the pipe
-        dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
-        close(pipefd[1]);           // Close pipe write end after duplication
+    if (pid1 == 0) {  
+        close(pipefd[0]);          
+        dup2(pipefd[1], STDOUT_FILENO);  
+        close(pipefd[1]);           
 
-        executeCommandNoFork(firstCommand);  // Execute the first command
-        exit(1);  // Should not reach here if execv succeeds
+        executeCommandNoFork(firstCommand); 
+        exit(1);  
     }
 
     pid_t pid2 = fork();
-    if (pid2 == 0) {  // Second child process
-        close(pipefd[1]);           // Close write end of the pipe
-        dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
-        close(pipefd[0]);           // Close pipe read end after duplication
+    if (pid2 == 0) { 
+        close(pipefd[1]);          
+        dup2(pipefd[0], STDIN_FILENO); 
+        close(pipefd[0]);           
 
-        executeCommandNoFork(secondCommand);  // Execute the second command
-        exit(1);  // Should not reach here if execv succeeds
+        executeCommandNoFork(secondCommand);  
+        exit(1);  
     }
 
-    // Parent process
-    close(pipefd[0]);  // Close both ends of the pipe
+    // parent process
+    close(pipefd[0]);  
     close(pipefd[1]);
 
     int status1, status2;
-    waitpid(pid1, &status1, 0);  // Wait for the first child
-    waitpid(pid2, &status2, 0);  // Wait for the second child
+    waitpid(pid1, &status1, 0);  
+    waitpid(pid2, &status2, 0);  
 
     if (WIFEXITED(status2)) {
         int exitCode = WEXITSTATUS(status2);
@@ -669,7 +641,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
     }
 }
 
-// Checks if command has a pipe and calls functions to handle it
+// check if command has pipe and call function
 void manageCommands(Node* head) {
     if (head == NULL) {
         return;
@@ -677,7 +649,7 @@ void manageCommands(Node* head) {
 
     head = expandTokenList(head);
 
-    // Detect pipe in the command
+    // detect pipe in the command
     Node* prev = NULL;
     Node* pipeNode = head;
     while (pipeNode != NULL && strcmp(pipeNode->word, "|") != 0) {
@@ -685,13 +657,13 @@ void manageCommands(Node* head) {
         pipeNode = pipeNode->next;
     }
 
-    // If prev is NULL that means pipe is first token so throw an error
+    // if prev is null pipe is first token throw error
     if (prev == NULL) {
         fprintf(stderr, "Error: Pipe must connect two commands\n");
     }
 
     // handle pipe
-    if (pipeNode != NULL) {  // Pipe detected
+    if (pipeNode != NULL) {  
         prev->next = NULL;
         Node* secondCommand = pipeNode->next;
         free(pipeNode->word);
@@ -770,11 +742,9 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-
     free(line);
     if (fd != STDIN_FILENO) {
         close(fd);
     }
-
     return EXIT_SUCCESS;
 }
