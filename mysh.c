@@ -406,21 +406,24 @@ void executeCommand(Node* head) {
     }
 
     // Fork and execute
-    pid_t pid = fork();
-    if (pid == 0) {  // Child process
-        execv(executablePath, argv);
-        perror("execv failed");  // If execv fails
-        exit(1);
-    } else if (pid > 0) {  // Parent process
-        int status;
-        waitpid(pid, &status, 0);  // Wait for child process
-        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-            fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
-        }
-    } else {
-        perror("fork failed");
-    }
-    
+    // pid_t pid = fork();
+    // if (pid == 0) {  // Child process
+    //     execv(executablePath, argv);
+    //     perror("execv failed");  // If execv fails
+    //     exit(1);
+    // } else if (pid > 0) {  // Parent process
+    //     int status;
+    //     waitpid(pid, &status, 0);  // Wait for child process
+    //     if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+    //         fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
+    //     }
+    // } else {
+    //     perror("fork failed");
+    // }
+    execv(executablePath, argv);
+    perror("execv failed");  // If execv fails
+    exit(1);
+
     dup2(originalStdin, STDIN_FILENO);
     dup2(originalStdout, STDOUT_FILENO);
     close(originalStdin);
@@ -436,10 +439,11 @@ void handleCommands(Node* head) {
     if (!head) return;
 
     char* command = head->word;
+    int listSize = getListSize(head);
 
     // Check if the command is built-in
     if (strcmp(command, "cd") == 0) {
-        if (getListSize(head) != 2) {
+        if (listSize != 2) {
             fprintf(stderr, "cd: only one file name as argument.\n");
         } else {
             Node* argNode = head->next;
@@ -455,9 +459,13 @@ void handleCommands(Node* head) {
             perror("pwd");
         }
     } else if (strcmp(command, "which") == 0) {
-        char* path = findExecutablePath(command);
-        if (path != NULL) {
-            printf("%s\n", path);
+        if (listSize != 2) {
+            fprintf(stderr, "cd: only one file name as argument.\n");
+        } else {
+            char* path = findExecutablePath(head->next->word);
+            if (path != NULL) {
+                printf("%s\n", path);
+            }
         }
 
     } else if (strcmp(command, "exit") == 0) {
@@ -470,12 +478,13 @@ void handleCommands(Node* head) {
         if (interactive) {
             printf("Exiting my shell.\n");
         }
-        exit(0);
+        exit(69);
     } else {
         executeCommand(head);
     }
     
     freeTokenList(head);
+    exit(0);
 }
 
 void executePipe(Node* firstCommand, Node* secondCommand) {
@@ -491,7 +500,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
         close(pipefd[1]);           // Close pipe write end after duplication
 
-        executeCommand(firstCommand);  // Execute the first command
+        handleCommands(firstCommand);  // Execute the first command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -501,7 +510,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
         close(pipefd[0]);           // Close pipe read end after duplication
 
-        executeCommand(secondCommand);  // Execute the second command
+        handleCommands(secondCommand);  // Execute the second command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -514,8 +523,29 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
     waitpid(pid2, &status2, 0);  // Wait for the second child
 
     if (WIFEXITED(status2)) {
-        printf("Last command exited with status %d\n", WEXITSTATUS(status2));
+        int exitCode = WEXITSTATUS(status2);
+        if (exitCode == 0) {
+            fprintf(stderr, "Last command exited with code 0\n");
+        } else if (exitCode == 69){
+
+        } else {
+            fprintf(stderr, "Last command exited with code %d\n", exitCode);
+        }
+    } else if (WIFSIGNALED(status2)) {
+        int signalNum = WTERMSIG(status2);
+        fprintf(stderr, "Terminated by signal: %d\n", signalNum);
     }
+    // int status;
+    // pid_t child_pid;
+
+    // while ((child_pid = waitpid(-1, &status, 0)) >= 0) {
+    //     printf("getting here\n");
+    //     if (WIFEXITED(status)) {
+    //         printf("Process %d exited with status %d\n", child_pid, WEXITSTATUS(status));
+    //     } else if (WIFSIGNALED(status)) {
+    //         printf("Process %d terminated by signal %d\n", child_pid, WTERMSIG(status));
+    //     }
+    // }
 }
 
 // Checks if command has a pipe and calls functions to handle it
@@ -551,7 +581,29 @@ void manageCommands(Node* head) {
     }
     // if no pipe in the line handle normally
     else{
-        handleCommands(head);
+        pid_t pid = fork();
+        if (pid == 0) {  // Second child process
+            handleCommands(head);  // Execute the second command
+            exit(1);  // Should not reach here if execv succeeds
+        }
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            int exitCode = WEXITSTATUS(status);
+            if (exitCode == 0) {
+                fprintf(stderr, "Last command exited with code 0\n");
+            } else if (exitCode == 69){
+                if (interactive) {
+                    printf("Exiting shell time to 69 ;)\n");
+                }
+                exit(0);
+            } else {
+                fprintf(stderr, "Last command exited with code %d\n", exitCode);
+            }
+        } else if (WIFSIGNALED(status)) {
+            int signalNum = WTERMSIG(status);
+            fprintf(stderr, "Terminated by signal: %d\n", signalNum);
+        }
     }
 }
 
@@ -597,7 +649,7 @@ int main(int argc, char* argv[]) {
 
         for (ssize_t i = 0; i < bytes_read; i++) {
             char c = buffer[i];
-            if (c == '\n') { // End of line
+            if (c == '\n' || c == EOF) { // End of line
                 line[lineLength] = '\0';
 
                 Node* head = createTokenList(line);
@@ -617,6 +669,15 @@ int main(int argc, char* argv[]) {
                 }
                 line[lineLength++] = c;
             }
+        }
+    }
+
+    if (lineLength > 0) {
+        line[lineLength] = '\0';  // Ensure it's null-terminated
+
+        Node* head = createTokenList(line);
+        if (head) {
+            manageCommands(head);
         }
     }
 
