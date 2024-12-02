@@ -284,7 +284,154 @@ char* findExecutablePath(const char* command) {
     }
     return NULL;  // Command not found
 }
+void executeCommandNoFork(Node* head) {
+    if (!head) return;
 
+    char* inputFile = NULL;
+    char* outputFile = NULL;
+    // < hello.txt cat a.txt
+    // Parse redirection tokens
+
+    Node* prev = NULL;
+    Node* curr = head;
+    while (curr != NULL) {
+        if (strcmp(curr->word, "<") == 0) {  // Input redirection
+            if (curr->next) {
+                inputFile = strdup(curr->next->word);
+
+                Node* temp = curr;
+                curr = curr->next->next;
+
+                // Free redirection token and file
+                free(temp->next->word);
+                free(temp->next);
+                free(temp->word);
+                free(temp);
+
+                if (prev) {
+                    prev->next = curr;
+                } else {
+                    head = curr;  // Update head if the first node is removed
+                }
+                continue;
+            } else {
+                fprintf(stderr, "Error: Missing input file for redirection\n");
+                exit(1);
+            }
+        } else if (strcmp(curr->word, ">") == 0) {  // Output redirection
+            if (curr->next) {
+                outputFile = strdup(curr->next->word);
+
+                Node* temp = curr;
+                curr = curr->next->next;
+
+                // Free redirection token and file
+                free(temp->next->word);
+                free(temp->next);
+                free(temp->word);
+                free(temp);
+
+                if (prev) {
+                    prev->next = curr;
+                } else {
+                    head = curr;  // Update head if the first node is removed
+                }
+                continue;
+            } else {
+                fprintf(stderr, "Error: Missing output file for redirection\n");
+                exit(1);
+            }
+        }
+
+        prev = curr;
+        curr = curr->next;
+        
+    }
+    
+    char* command = head->word;
+
+    // Build argument list
+    int argc = getListSize(head);
+    char** argv = malloc((argc + 1) * sizeof(char*));
+    Node* current = head;
+    for (int i = 0; i < argc; i++) {
+        argv[i] = strdup(current->word);
+        current = current->next;
+    }
+    argv[argc] = NULL;
+    
+    int originalStdin = dup(STDIN_FILENO);
+    int originalStdout = dup(STDOUT_FILENO);
+
+    // Handle input redirection
+    if (inputFile) {
+        int fd = open(inputFile, O_RDONLY);
+        if (fd < 0) {
+            perror("Failed to open input file");
+            exit(1);
+        }
+        dup2(fd, STDIN_FILENO);
+        close(fd);
+        free(inputFile);
+    }
+
+    // Handle output redirection
+    if (outputFile) {
+        int fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+        if (fd < 0) {
+            perror("Failed to open output file");
+            exit(1);
+        }
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+        free(outputFile);
+    }
+
+    // Find path of executable used for execv()
+
+    char* executablePath = command;
+    if (strchr(command, '/') == NULL) {  // Bare name (doesn't contain '/')
+        executablePath = findExecutablePath(command);
+    }
+
+    // Command not found
+    if (!executablePath) {
+        fprintf(stderr, "%s: command not found\n", command);
+        for (int i = 0; i < argc; i++) {
+            free(argv[i]);  
+        }
+        free(argv);
+        exit(127);  // Do not call execv or exit; return to shell loop
+    }
+
+    // Fork and execute
+    // pid_t pid = fork();
+    // if (pid == 0) {  // Child process
+    //     execv(executablePath, argv);
+    //     perror("execv failed");  // If execv fails
+    //     exit(1);
+    // } else if (pid > 0) {  // Parent process
+    //     int status;
+    //     waitpid(pid, &status, 0);  // Wait for child process
+    //     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+    //         fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
+    //     }
+    // } else {
+    //     perror("fork failed");
+    // }
+    
+    dup2(originalStdin, STDIN_FILENO);
+    dup2(originalStdout, STDOUT_FILENO);
+    close(originalStdin);
+    close(originalStdout);
+
+    // for (int i = 0; i < argc; i++) {
+    //     free(argv[i]);  
+    // }
+    execv(executablePath, argv);
+    perror("execv failed");
+    free(argv);
+}
 void executeCommand(Node* head) {
     if (!head) return;
 
@@ -404,10 +551,23 @@ void executeCommand(Node* head) {
         free(argv);
         return;  // Do not call execv or exit; return to shell loop
     }
-    execv(executablePath, argv);
-    perror("execv failed");  // If execv fails
-    exit(1);
 
+    // Fork and execute
+    pid_t pid = fork();
+    if (pid == 0) {  // Child process
+        execv(executablePath, argv);
+        perror("execv failed");  // If execv fails
+        exit(1);
+    } else if (pid > 0) {  // Parent process
+        int status;
+        waitpid(pid, &status, 0);  // Wait for child process
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
+        }
+    } else {
+        perror("fork failed");
+    }
+    
     dup2(originalStdin, STDIN_FILENO);
     dup2(originalStdout, STDOUT_FILENO);
     close(originalStdin);
@@ -419,15 +579,14 @@ void executeCommand(Node* head) {
     free(argv);
 }
 
-int handleCommands(Node* head) {
-    if (!head) return 1;  // No command to handle
+void handleCommands(Node* head) {
+    if (!head) return;
 
     char* command = head->word;
-    int listSize = getListSize(head);
 
     // Check if the command is built-in
     if (strcmp(command, "cd") == 0) {
-        if (listSize != 2) {
+        if (getListSize(head) != 2) {
             fprintf(stderr, "cd: only one file name as argument.\n");
         } else {
             Node* argNode = head->next;
@@ -435,8 +594,6 @@ int handleCommands(Node* head) {
                 perror("cd");
             }
         }
-        freeTokenList(head);
-        return 1;  // Indicate a built-in command was executed
     } else if (strcmp(command, "pwd") == 0) {
         char cwd[BUFFER_SIZE];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
@@ -444,21 +601,12 @@ int handleCommands(Node* head) {
         } else {
             perror("pwd");
         }
-        freeTokenList(head);
-        return 1;
     } else if (strcmp(command, "which") == 0) {
-        if (listSize != 2) {
-            fprintf(stderr, "which: requires exactly one argument.\n");
-        } else {
-            char* path = findExecutablePath(head->next->word);
-            if (path != NULL) {
-                printf("%s\n", path);
-            } else {
-                fprintf(stderr, "%s: not found\n", head->next->word);
-            }
+        char* path = findExecutablePath(command);
+        if (path != NULL) {
+            printf("%s\n", path);
         }
-        freeTokenList(head);
-        return 1;
+
     } else if (strcmp(command, "exit") == 0) {
         Node* ptr = head->next;
         while (ptr != NULL) {
@@ -469,16 +617,13 @@ int handleCommands(Node* head) {
         if (interactive) {
             printf("Exiting my shell.\n");
         }
-        freeTokenList(head);
-        exit(69);
+        exit(0);
+    } else {
+        executeCommand(head);
     }
-
-    // External command; delegate to executeCommand
-    executeCommand(head);
+    
     freeTokenList(head);
-    return 0;  // Indicate an external command was executed
 }
-
 
 void executePipe(Node* firstCommand, Node* secondCommand) {
     int pipefd[2];  // Pipe file descriptors
@@ -493,7 +638,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe write end
         close(pipefd[1]);           // Close pipe write end after duplication
 
-        handleCommands(firstCommand);  // Execute the first command
+        executeCommandNoFork(firstCommand);  // Execute the first command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -503,7 +648,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         dup2(pipefd[0], STDIN_FILENO);  // Redirect stdin to pipe read end
         close(pipefd[0]);           // Close pipe read end after duplication
 
-        handleCommands(secondCommand);  // Execute the second command
+        executeCommandNoFork(secondCommand);  // Execute the second command
         exit(1);  // Should not reach here if execv succeeds
     }
 
@@ -517,13 +662,7 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
 
     if (WIFEXITED(status2)) {
         int exitCode = WEXITSTATUS(status2);
-        if (exitCode == 0) {
-            fprintf(stderr, "Last command exited with code 0\n");
-        } else if (exitCode == 69){
-
-        } else {
-            fprintf(stderr, "Last command exited with code %d\n", exitCode);
-        }
+        fprintf(stderr, "Last command exited with status %d\n", exitCode);
     } else if (WIFSIGNALED(status2)) {
         int signalNum = WTERMSIG(status2);
         fprintf(stderr, "Terminated by signal: %d\n", signalNum);
@@ -547,13 +686,11 @@ void manageCommands(Node* head) {
     }
 
     // If prev is NULL that means pipe is first token so throw an error
-    if (prev == NULL && pipeNode != NULL) {
+    if (prev == NULL) {
         fprintf(stderr, "Error: Pipe must connect two commands\n");
-        freeTokenList(head);
-        return;
     }
 
-    // Handle pipe
+    // handle pipe
     if (pipeNode != NULL) {  // Pipe detected
         prev->next = NULL;
         Node* secondCommand = pipeNode->next;
@@ -563,37 +700,11 @@ void manageCommands(Node* head) {
         executePipe(head, secondCommand);
         return;
     }
-
-    // Handle single command
-    pid_t pid = fork();
-    if (pid == 0) {  // Child process
-        int isBuiltIn = handleCommands(head);
-        exit(isBuiltIn);  // Child process exits with 1 for built-ins
-    }
-
-    // Parent process
-    int status;
-    waitpid(pid, &status, 0);
-    if (WIFEXITED(status)) {
-        int exitCode = WEXITSTATUS(status);
-        if (exitCode == 0) {
-            fprintf(stderr, "Last command exited with code 0\n");
-        } else if (exitCode == 69) {
-            if (interactive) {
-                printf("Exiting shell time to 69 ;)\n");
-            }
-            exit(0);
-        } else if (exitCode == 1) {
-            // Built-in command; do not print anything
-        } else {
-            fprintf(stderr, "Last command exited with code %d\n", exitCode);
-        }
-    } else if (WIFSIGNALED(status)) {
-        int signalNum = WTERMSIG(status);
-        fprintf(stderr, "Terminated by signal: %d\n", signalNum);
+    // if no pipe in the line handle normally
+    else{
+        handleCommands(head);
     }
 }
-
 
 int main(int argc, char* argv[]) {
     if (argc > 2) {
@@ -637,7 +748,7 @@ int main(int argc, char* argv[]) {
 
         for (ssize_t i = 0; i < bytes_read; i++) {
             char c = buffer[i];
-            if (c == '\n' || c == EOF) { // End of line
+            if (c == '\n') { // End of line
                 line[lineLength] = '\0';
 
                 Node* head = createTokenList(line);
@@ -657,15 +768,6 @@ int main(int argc, char* argv[]) {
                 }
                 line[lineLength++] = c;
             }
-        }
-    }
-
-    if (lineLength > 0) {
-        line[lineLength] = '\0';  // Ensure it's null-terminated
-
-        Node* head = createTokenList(line);
-        if (head) {
-            manageCommands(head);
         }
     }
 
