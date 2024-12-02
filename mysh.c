@@ -404,22 +404,6 @@ void executeCommand(Node* head) {
         free(argv);
         return;  // Do not call execv or exit; return to shell loop
     }
-
-    // Fork and execute
-    // pid_t pid = fork();
-    // if (pid == 0) {  // Child process
-    //     execv(executablePath, argv);
-    //     perror("execv failed");  // If execv fails
-    //     exit(1);
-    // } else if (pid > 0) {  // Parent process
-    //     int status;
-    //     waitpid(pid, &status, 0);  // Wait for child process
-    //     if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-    //         fprintf(stderr, "Command exited with code %d\n", WEXITSTATUS(status));
-    //     }
-    // } else {
-    //     perror("fork failed");
-    // }
     execv(executablePath, argv);
     perror("execv failed");  // If execv fails
     exit(1);
@@ -435,8 +419,8 @@ void executeCommand(Node* head) {
     free(argv);
 }
 
-void handleCommands(Node* head) {
-    if (!head) return;
+int handleCommands(Node* head) {
+    if (!head) return 1;  // No command to handle
 
     char* command = head->word;
     int listSize = getListSize(head);
@@ -451,6 +435,8 @@ void handleCommands(Node* head) {
                 perror("cd");
             }
         }
+        freeTokenList(head);
+        return 1;  // Indicate a built-in command was executed
     } else if (strcmp(command, "pwd") == 0) {
         char cwd[BUFFER_SIZE];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
@@ -458,16 +444,21 @@ void handleCommands(Node* head) {
         } else {
             perror("pwd");
         }
+        freeTokenList(head);
+        return 1;
     } else if (strcmp(command, "which") == 0) {
         if (listSize != 2) {
-            fprintf(stderr, "cd: only one file name as argument.\n");
+            fprintf(stderr, "which: requires exactly one argument.\n");
         } else {
             char* path = findExecutablePath(head->next->word);
             if (path != NULL) {
                 printf("%s\n", path);
+            } else {
+                fprintf(stderr, "%s: not found\n", head->next->word);
             }
         }
-
+        freeTokenList(head);
+        return 1;
     } else if (strcmp(command, "exit") == 0) {
         Node* ptr = head->next;
         while (ptr != NULL) {
@@ -478,14 +469,16 @@ void handleCommands(Node* head) {
         if (interactive) {
             printf("Exiting my shell.\n");
         }
+        freeTokenList(head);
         exit(69);
-    } else {
-        executeCommand(head);
     }
-    
+
+    // External command; delegate to executeCommand
+    executeCommand(head);
     freeTokenList(head);
-    exit(0);
+    return 0;  // Indicate an external command was executed
 }
+
 
 void executePipe(Node* firstCommand, Node* secondCommand) {
     int pipefd[2];  // Pipe file descriptors
@@ -535,17 +528,6 @@ void executePipe(Node* firstCommand, Node* secondCommand) {
         int signalNum = WTERMSIG(status2);
         fprintf(stderr, "Terminated by signal: %d\n", signalNum);
     }
-    // int status;
-    // pid_t child_pid;
-
-    // while ((child_pid = waitpid(-1, &status, 0)) >= 0) {
-    //     printf("getting here\n");
-    //     if (WIFEXITED(status)) {
-    //         printf("Process %d exited with status %d\n", child_pid, WEXITSTATUS(status));
-    //     } else if (WIFSIGNALED(status)) {
-    //         printf("Process %d terminated by signal %d\n", child_pid, WTERMSIG(status));
-    //     }
-    // }
 }
 
 // Checks if command has a pipe and calls functions to handle it
@@ -565,11 +547,13 @@ void manageCommands(Node* head) {
     }
 
     // If prev is NULL that means pipe is first token so throw an error
-    if (prev == NULL) {
+    if (prev == NULL && pipeNode != NULL) {
         fprintf(stderr, "Error: Pipe must connect two commands\n");
+        freeTokenList(head);
+        return;
     }
 
-    // handle pipe
+    // Handle pipe
     if (pipeNode != NULL) {  // Pipe detected
         prev->next = NULL;
         Node* secondCommand = pipeNode->next;
@@ -579,33 +563,37 @@ void manageCommands(Node* head) {
         executePipe(head, secondCommand);
         return;
     }
-    // if no pipe in the line handle normally
-    else{
-        pid_t pid = fork();
-        if (pid == 0) {  // Second child process
-            handleCommands(head);  // Execute the second command
-            exit(1);  // Should not reach here if execv succeeds
-        }
-        int status;
-        waitpid(pid, &status, 0);
-        if (WIFEXITED(status)) {
-            int exitCode = WEXITSTATUS(status);
-            if (exitCode == 0) {
-                fprintf(stderr, "Last command exited with code 0\n");
-            } else if (exitCode == 69){
-                if (interactive) {
-                    printf("Exiting shell time to 69 ;)\n");
-                }
-                exit(0);
-            } else {
-                fprintf(stderr, "Last command exited with code %d\n", exitCode);
+
+    // Handle single command
+    pid_t pid = fork();
+    if (pid == 0) {  // Child process
+        int isBuiltIn = handleCommands(head);
+        exit(isBuiltIn);  // Child process exits with 1 for built-ins
+    }
+
+    // Parent process
+    int status;
+    waitpid(pid, &status, 0);
+    if (WIFEXITED(status)) {
+        int exitCode = WEXITSTATUS(status);
+        if (exitCode == 0) {
+            fprintf(stderr, "Last command exited with code 0\n");
+        } else if (exitCode == 69) {
+            if (interactive) {
+                printf("Exiting shell time to 69 ;)\n");
             }
-        } else if (WIFSIGNALED(status)) {
-            int signalNum = WTERMSIG(status);
-            fprintf(stderr, "Terminated by signal: %d\n", signalNum);
+            exit(0);
+        } else if (exitCode == 1) {
+            // Built-in command; do not print anything
+        } else {
+            fprintf(stderr, "Last command exited with code %d\n", exitCode);
         }
+    } else if (WIFSIGNALED(status)) {
+        int signalNum = WTERMSIG(status);
+        fprintf(stderr, "Terminated by signal: %d\n", signalNum);
     }
 }
+
 
 int main(int argc, char* argv[]) {
     if (argc > 2) {
